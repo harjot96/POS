@@ -1,4 +1,3 @@
-require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const User = require('../models/User')
 const jwt = require('jsonwebtoken')
@@ -64,7 +63,9 @@ const loginUser = async (req, res) => {
         res.status(200).json({
             success: true,
             message: 'Login successfully',
-            user: { id: checkExistingUser._id, userName: checkExistingUser.userName, email: checkExistingUser.email, phone: checkExistingUser.phone, shop: checkExistingUser.shop_name },
+            user: {
+                id: checkExistingUser._id, userName: checkExistingUser.userName, email: checkExistingUser.email, phone: checkExistingUser.phone, shop_name: checkExistingUser.shop_name, business_type: checkExistingUser.business_type
+            },
             accessToken
         })
     } catch (error) {
@@ -75,4 +76,11 @@ const loginUser = async (req, res) => {
     }
 }
 
-module.exports = { registerUser, loginUser }
+const deleteUser = async (req, res) => {
+    try {
+
+    } catch (error) {
+
+    }
+}
+module.exports = { registerUser, loginUser, deleteUser }
