@@ -2,7 +2,7 @@
 
 const express = require('express');
 const mongoose = require('mongoose');
-const Sales = require('../models/Sales');
+const Sales = require('../models/sales');
 const Inventory = mongoose.models.Inventory || require('../models/Inventory');
 const router = express.Router();
 
