@@ -43,7 +43,9 @@ const verifyOtp = async (req, res) => {
         let user = await User.findOne({ phone });
 
         if (!user) {
-            // New user, needs to register
+            // Create a new user record with just the phone number
+            user = new User({ phone });
+            await user.save();
             return res.status(200).json({
                 success: true,
                 isNewUser: true,
@@ -91,6 +93,7 @@ const verifyOtp = async (req, res) => {
     }
 };
 
+
 // **3️⃣ Register User After OTP Verification**
 const registerUser = async (req, res) => {
     try {
@@ -99,32 +102,32 @@ const registerUser = async (req, res) => {
         let user = await User.findOne({ phone });
 
         if (!user) {
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
-    
-            // Update user details
-            user.userName = userName;
-            user.email = email;
-            user.password = hashedPassword;
-            user.shop_name = shop_name;
-            user.business_type = business_type;
-            user.role = role || 'user';
-            user.subscription_plan = subscription_plan || "Basic";
-    
-            await user.save();
-    
-            res.status(201).json({
-                success: true,
-                message: "User registered successfully",
-                user: { id: user._id, userName, email, phone }
-            });
+            return res.status(400).json({ success: false, message: "Phone number not verified. Please verify OTP first!" });
         }
 
         if (user.userName) {
             return res.status(400).json({ success: false, message: "User is already registered!" });
         }
 
-    
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Update user details
+        user.userName = userName;
+        user.email = email;
+        user.password = hashedPassword;
+        user.shop_name = shop_name;
+        user.business_type = business_type;
+        user.role = role || 'user';
+        user.subscription_plan = subscription_plan || "Basic";
+
+        await user.save();
+
+        res.status(201).json({
+            success: true,
+            message: "User registered successfully",
+            user: { id: user._id, userName, email, phone }
+        });
     } catch (error) {
         console.log(error);
         res.status(500).json({ success: false, message: "Something went wrong. Please try again!" });
