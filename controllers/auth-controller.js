@@ -43,9 +43,7 @@ const verifyOtp = async (req, res) => {
         let user = await User.findOne({ phone });
 
         if (!user) {
-            // Create a new user record with just the phone number
-            user = new User({ phone });
-            await user.save();
+            // New user, needs to register
             return res.status(200).json({
                 success: true,
                 isNewUser: true,
@@ -93,26 +91,27 @@ const verifyOtp = async (req, res) => {
     }
 };
 
-
 // **3️⃣ Register User After OTP Verification**
 const registerUser = async (req, res) => {
     try {
         const { phone, userName, email, password, shop_name, business_type, role, subscription_plan } = req.body;
+        console.log(req.body);
 
+        // Try to find an existing user by phone
         let user = await User.findOne({ phone });
-
+        console.log(user);
+        
+        // If no user exists, create a new instance with the phone number
         if (!user) {
-            return res.status(400).json({ success: false, message: "Phone number not verified. Please verify OTP first!" });
+            user = new User({ phone });
         }
-
-        if (user.userName) {
-            return res.status(400).json({ success: false, message: "User is already registered!" });
-        }
-
+        
+        // Hash the password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
+        console.log(hashedPassword);
 
-        // Update user details
+        // Update or set user details
         user.userName = userName;
         user.email = email;
         user.password = hashedPassword;
@@ -133,5 +132,6 @@ const registerUser = async (req, res) => {
         res.status(500).json({ success: false, message: "Something went wrong. Please try again!" });
     }
 };
+
 
 module.exports = { sendOtp, verifyOtp, registerUser };
