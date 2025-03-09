@@ -91,15 +91,42 @@ router.post('/add-product-inventory', async (req, res) => {
 
 // Get Inventory for a Shopkeeper
 router.get('/:shopkeeper_id', async (req, res) => {
-    console.log(req.params.shopkeeper_id);
-    
     try {
-        const inventorys = await inventory.find({ shopkeeper_id: req.params.shopkeeper_id });
-        res.status(200).json(inventorys);
+      // Fetch all inventory docs for this shopkeeper, populating product details
+      const inventories = await inventory
+        .find({ shopkeeper_id: req.params.shopkeeper_id })
+        .populate('products.product_id')
+        .exec();
+  
+      // Transform the Mongoose documents into a cleaner, front-end-friendly response
+      const transformed = inventories.map((inv) => ({
+        id: inv._id, // rename _id -> id
+        shopkeeperId: inv.shopkeeper_id,
+        createdAt: inv.created_at,
+        updatedAt: inv.updated_at,
+        products: inv.products.map((p) => ({
+          // Each item in the "products" array
+          id: p._id, // subdocument ID
+          productId: p.product_id?._id, // the actual product's ID
+          name: p.product_id?.name || p.name, // fallback if not populated
+          description: p.product_id?.description,
+          stockQuantity: p.stock_quantity,
+          purchasePrice: p.purchase_price,
+          sellingPrice: p.selling_price,
+          barcode: p.product_id?.barcode,
+          sku: p.product_id?.sku,
+          category: p.product_id?.category,
+          expirationDate: p.expiration_date,
+        })),
+      }));
+  
+      res.status(200).json(transformed);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching inventory', error });
+      console.error('Error fetching inventory:', error);
+      res.status(500).json({ message: 'Error fetching inventory', error });
     }
-});
+  });
+  
 
 // Update Inventory Product Details
 router.put('/update/:id', async (req, res) => {
