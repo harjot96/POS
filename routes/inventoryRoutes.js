@@ -3,6 +3,8 @@
 const express = require('express');
 const product = require('../models/product');
 const inventory = require('../models/Inventory');
+const sales = require('../models/sales');
+const { default: mongoose } = require('mongoose');
 
 const router = express.Router();
 
@@ -124,6 +126,121 @@ router.get('/:shopkeeper_id', async (req, res) => {
     } catch (error) {
       console.error('Error fetching inventory:', error);
       res.status(500).json({ message: 'Error fetching inventory', error });
+    }
+  });
+
+  router.get('/:shopkeeper_id/stats', async (req, res) => {
+    const { shopkeeper_id } = req.params;
+    const LOW_STOCK_THRESHOLD = 10; // Customize the threshold as needed
+  
+    try {
+      // Find all inventory documents for this shopkeeper
+      const inventories = await inventory.find({ shopkeeper_id }).exec();
+  
+      // We’ll accumulate the stats across all inventory records
+      let totalProducts = 0;
+      let outOfStock = 0;
+      let lowInStock = 0;
+  
+      inventories.forEach((inv) => {
+        inv.products.forEach((p) => {
+          totalProducts++;
+  
+          if (p.stock_quantity === 0) {
+            outOfStock++;
+          } else if (p.stock_quantity < LOW_STOCK_THRESHOLD) {
+            lowInStock++;
+          }
+        });
+      });
+  
+      // Return the computed stats
+      res.status(200).json({
+        totalProducts,
+        outOfStock,
+        lowInStock
+      });
+    } catch (error) {
+      console.error('Error fetching inventory stats:', error);
+      res.status(500).json({ message: 'Error fetching inventory stats', error });
+    }
+  });
+
+  router.get('/:shopkeeper_id/fastselling', async (req, res) => {
+    try {
+      const { shopkeeper_id } = req.params;
+  
+      // Convert to a Mongoose ObjectId (good practice to ensure correct format)
+      const shopkeeperObjectId = new mongoose.Types.ObjectId(shopkeeper_id);
+  
+      // Aggregation pipeline steps:
+      // 1. Match sales belonging to this shopkeeper.
+      // 2. Unwind "items" so each item in the array becomes its own document.
+      // 3. Group by product_id, summing the quantities across all sales.
+      // 4. Sort by totalSold in descending order.
+      // 5. Lookup product details from the "products" collection.
+      // 6. Unwind the looked-up array (productInfo).
+      // 7. Project/rename fields as needed.
+      // 8. (Optional) limit how many you want to return, e.g. top 5 or 10.
+  
+      const pipeline = [
+        {
+          $match: {
+            shopkeeper_id: shopkeeperObjectId
+          }
+        },
+        // Each item in "items" will become a separate doc in the pipeline
+        {
+          $unwind: '$items'
+        },
+        {
+          $group: {
+            _id: '$items.product_id',         // group by product's ObjectId
+            totalSold: { $sum: '$items.quantity' } // sum the quantity across all sales
+          }
+        },
+        {
+          $sort: { totalSold: -1 } // sort by totalSold descending
+        },
+        {
+          // Lookup product details from the "products" collection
+          $lookup: {
+            from: 'products',    // name of the Products collection in MongoDB
+            localField: '_id',   // the product_id from our group
+            foreignField: '_id', // _id of the product in the Products collection
+            as: 'productInfo'
+          }
+        },
+        // productInfo will be an array. Unwind it to flatten
+        {
+          $unwind: '$productInfo'
+        },
+        // (Optional) limit to top 5
+        // { $limit: 5 }, 
+        {
+          // Choose which fields to return (rename as needed)
+          $project: {
+            productId: '$_id',
+            totalSold: 1,
+            'productInfo.name': 1,
+            'productInfo.barcode': 1,
+            'productInfo.sku': 1,
+            'productInfo.price': 1,
+            'productInfo.description': 1,
+            _id: 0
+          }
+        }
+      ];
+  
+      const fastSelling = await sales.aggregate(pipeline).exec();
+  
+      return res.status(200).json({
+        message: 'Fast-selling products fetched successfully',
+        data: fastSelling
+      });
+    } catch (error) {
+      console.error('Error fetching fast-selling products:', error);
+      res.status(500).json({ message: 'Server error', error });
     }
   });
   
