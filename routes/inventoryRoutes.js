@@ -4,6 +4,7 @@ const express = require('express');
 const product = require('../models/product');
 const inventory = require('../models/Inventory');
 const sales = require('../models/sales');
+const category = require('../models/category');
 const { default: mongoose } = require('mongoose');
 
 const router = express.Router();
@@ -92,32 +93,35 @@ router.post('/add-product-inventory', async (req, res) => {
 
 
 // Get Inventory for a Shopkeeper
+
 router.get('/:shopkeeper_id', async (req, res) => {
     try {
-      // Fetch all inventory docs for this shopkeeper, populating product details
-      const inventories = await inventory
-        .find({ shopkeeper_id: req.params.shopkeeper_id })
-        .populate('products.product_id')
+      // Find all inventory docs for this shopkeeper and populate product details along with category info
+      const inventories = await inventory.find({ shopkeeper_id: req.params.shopkeeper_id })
+        .populate({
+          path: 'products.product_id',
+          populate: { path: 'category', model: 'category' } // Nested population for category
+        })
         .exec();
   
-      // Transform the Mongoose documents into a cleaner, front-end-friendly response
+      // Transform the Mongoose documents into a front-end-friendly response
       const transformed = inventories.map((inv) => ({
         id: inv._id, // rename _id -> id
         shopkeeperId: inv.shopkeeper_id,
         createdAt: inv.created_at,
         updatedAt: inv.updated_at,
         products: inv.products.map((p) => ({
-          // Each item in the "products" array
           id: p._id, // subdocument ID
-          productId: p.product_id?._id, // the actual product's ID
-          name: p.product_id?.name || p.name, // fallback if not populated
-          description: p.product_id?.description,
+          productId: p.product_id ? p.product_id._id : null, // actual product's ID
+          name: p.product_id ? p.product_id.name : p.name, // fallback if not populated
+          description: p.product_id ? p.product_id.description : undefined,
           stockQuantity: p.stock_quantity,
           purchasePrice: p.purchase_price,
           sellingPrice: p.selling_price,
-          barcode: p.product_id?.barcode,
-          sku: p.product_id?.sku,
-          category: p.product_id?.category,
+          barcode: p.product_id ? p.product_id.barcode : undefined,
+          sku: p.product_id ? p.product_id.sku : undefined,
+          // Category data from nested population
+          category: p.product_id ? p.product_id.category.name : null,
           expirationDate: p.expiration_date,
         })),
       }));
@@ -128,6 +132,7 @@ router.get('/:shopkeeper_id', async (req, res) => {
       res.status(500).json({ message: 'Error fetching inventory', error });
     }
   });
+  
 
   router.get('/:shopkeeper_id/stats', async (req, res) => {
     const { shopkeeper_id } = req.params;
