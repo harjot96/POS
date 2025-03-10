@@ -111,6 +111,7 @@ router.get('/:shopkeeper_id', async (req, res) => {
         createdAt: inv.created_at,
         updatedAt: inv.updated_at,
         products: inv.products.map((p) => ({
+            
           id: p._id, // subdocument ID
           productId: p.product_id ? p.product_id._id : null, // actual product's ID
           name: p.product_id ? p.product_id.name : p.name, // fallback if not populated
