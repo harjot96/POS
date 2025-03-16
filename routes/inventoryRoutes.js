@@ -409,6 +409,7 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
         quantity: item.leftoverStock || 0, // leftover stock
         totalSold: item.totalSold,        // you can keep totalSold if you want
       }));
+      
 
       return res.json({
         filter: 'Most Selling',
@@ -432,9 +433,10 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
       const productDoc = p.product_id || {};
       return {
         id: p._id, // subdoc ID
+
         code: productDoc.sku || productDoc.barcode || '',
         image:productDoc.image||'',
-
+        productId:p.product_id,
         name: productDoc.name || 'Unnamed Product',
         price: p.selling_price, // price from inventory subdoc
         description: productDoc.description || '',
