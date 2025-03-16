@@ -6,89 +6,100 @@ const inventory = require('../models/Inventory');
 const sales = require('../models/sales');
 const category = require('../models/category');
 const { default: mongoose } = require('mongoose');
+const { uploadImage } = require('../services/cloudinaryService');
+const multer = require('multer');
 
 const router = express.Router();
 
+// Setup multer to store files in memory
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
 // Add a Product to Inventory
 // Add a New Product & Add to Inventory
-router.post('/add-product-inventory', async (req, res) => {
-    try {
-        const {
-            shopkeeper_id,
-            name,
-            category_id,
-            sku,
-            barcode,
-            description,
-            stock_quantity,
-            price,
-            purchase_price,
-            selling_price,
-            expiration_date
-        } = req.body;
+router.post('/add-product-inventory', upload.single('image'), async (req, res) => {
+  try {
+    const {
+      shopkeeper_id,
+      name,
+      category_id,
+      sku,
+      barcode,
+      description,
+      stock_quantity,
+      price,
+      purchase_price,
+      selling_price,
+      expiration_date,
+    } = req.body;
 
-        // Step 1: Check if the product exists (by SKU or Barcode)
-        let existingProduct = await product.findOne({ $or: [{ sku }, { barcode }] });
-
-        if (!existingProduct) {
-            // Step 2: Create a new product if it does not exist
-            existingProduct = new product({
-                shopkeeper_id,
-                name,
-                category: category_id,
-                price,
-                sku,
-                barcode,
-                description
-            });
-            await existingProduct.save();
-        }
-
-        // Step 3: Check if the shopkeeper's inventory exists
-        let shopkeeperInventory = await inventory.findOne({ shopkeeper_id });
-
-        if (!shopkeeperInventory) {
-            // Step 4: Create inventory if it doesn't exist
-            shopkeeperInventory = new inventory({
-                shopkeeper_id,
-                products: []
-            });
-        }
-
-        // Step 5: Check if the product is already in the inventory
-        const productExists = shopkeeperInventory.products.some(
-            (item) => item.product_id.toString() === existingProduct._id.toString()
-        );
-
-        if (productExists) {
-            return res.status(400).json({ message: 'Product already exists in inventory' });
-        }
-
-        console.log(existingProduct);
-        
-        // Step 6: Add the new product to the inventory
-        shopkeeperInventory.products.push({
-            product_id: existingProduct._id,
-            name,
-            stock_quantity,
-            purchase_price,
-            selling_price,
-            expiration_date
-        });
-
-        await shopkeeperInventory.save();
-
-        res.status(201).json({
-            message: 'Product added to inventory successfully',
-            inventory: shopkeeperInventory
-        });
-
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Error adding product to inventory', error });
+    // If an image file is provided, upload it to Cloudinary
+    let imageUrl = '';
+    if (req.file) {
+      const result = await uploadImage(req.file);
+      imageUrl = result.secure_url;
     }
-});
 
+    // Step 1: Check if the product exists (by SKU or Barcode)
+    let existingProduct = await product.findOne({ $or: [{ sku }, { barcode }] });
+
+    if (!existingProduct) {
+      // Step 2: Create a new product if it does not exist
+      existingProduct = new product({
+        shopkeeper_id,
+        name,
+        category: category_id,
+        price,
+        sku,
+        barcode,
+        description,
+        image: imageUrl, // Save image URL in the product model
+      });
+      await existingProduct.save();
+    }
+
+    // Step 3: Check if the shopkeeper's inventory exists
+    let shopkeeperInventory = await inventory.findOne({ shopkeeper_id });
+
+    if (!shopkeeperInventory) {
+      // Step 4: Create inventory if it doesn't exist
+      shopkeeperInventory = new inventory({
+        shopkeeper_id,
+        products: [],
+      });
+    }
+
+    // Step 5: Check if the product is already in the inventory
+    const productExists = shopkeeperInventory.products.some(
+      (item) => item.product_id.toString() === existingProduct._id.toString()
+    );
+
+    if (productExists) {
+      return res.status(400).json({ message: 'Product already exists in inventory' });
+    }
+
+    // Step 6: Add the new product to the inventory, including the image URL
+    shopkeeperInventory.products.push({
+      product_id: existingProduct._id,
+      name,
+      stock_quantity,
+      purchase_price,
+      selling_price,
+      expiration_date,
+      image: imageUrl, // Save image URL in inventory as well (if needed)
+    });
+
+    await shopkeeperInventory.save();
+
+    res.status(201).json({
+      message: 'Product added to inventory successfully',
+      inventory: shopkeeperInventory,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error adding product to inventory', error: error.message });
+  }
+});
 
 
 
@@ -298,13 +309,11 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
   try {
     const { shopkeeper_id } = req.params;
     const { filter, searchTerm } = req.query;
+    const shopkeeperObjectId = new mongoose.Types.ObjectId(shopkeeper_id);
 
-    // 1) Handle "Most Selling" filter with the same aggregation from your /fastselling route
-    //    If user specifically wants "Most Selling" results, we can skip inventory
-    //    and just return aggregator data:
+    // 1) Handle "Most Selling" filter with an aggregation pipeline
+    //    that merges leftover stock from the inventory.
     if (filter === 'Most Selling') {
-      const shopkeeperObjectId = new mongoose.Types.ObjectId(shopkeeper_id);
-
       const pipeline = [
         { $match: { shopkeeper_id: shopkeeperObjectId } },
         { $unwind: '$items' },
@@ -324,10 +333,44 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
           },
         },
         { $unwind: '$productInfo' },
+
+        // --- LOOKUP INVENTORY to get leftover stock ---
+        {
+          $lookup: {
+            from: 'inventories',
+            let: { productId: '$_id', shopkeeper: shopkeeperObjectId },
+            pipeline: [
+              // Match only this shopkeeper’s inventory
+              { $match: { $expr: { $eq: ['$shopkeeper_id', '$$shopkeeper'] } } },
+              // Unwind products array
+              { $unwind: '$products' },
+              // Match the same product
+              {
+                $match: {
+                  $expr: {
+                    $eq: ['$products.product_id', '$$productId'],
+                  },
+                },
+              },
+              // Only keep the stock_quantity
+              { $project: { 'products.stock_quantity': 1, _id: 0 } },
+            ],
+            as: 'inventoryInfo',
+          },
+        },
+        // If there's no matching product in the inventory, we still want to preserve the doc
+        {
+          $unwind: {
+            path: '$inventoryInfo',
+            preserveNullAndEmptyArrays: true,
+          },
+        },
         {
           $project: {
             productId: '$_id',
             totalSold: 1,
+            // leftoverStock from the inventory
+            leftoverStock: '$inventoryInfo.products.stock_quantity',
             'productInfo.name': 1,
             'productInfo.barcode': 1,
             'productInfo.sku': 1,
@@ -340,20 +383,35 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
 
       const fastSelling = await sales.aggregate(pipeline).exec();
 
-      // (Optional) apply a searchTerm filter if you want to match name/sku/barcode
+      // Optional searchTerm filter
       let filteredData = fastSelling;
       if (searchTerm) {
         const lowerSearch = searchTerm.toLowerCase();
         filteredData = fastSelling.filter((item) => {
           const name = item.productInfo.name?.toLowerCase() || '';
-          const code = item.productInfo.sku?.toLowerCase() || item.productInfo.barcode?.toLowerCase() || '';
+          const code =
+            item.productInfo.sku?.toLowerCase() ||
+            item.productInfo.barcode?.toLowerCase() ||
+            '';
           return name.includes(lowerSearch) || code.includes(lowerSearch);
         });
       }
 
+      // Transform the aggregator result so leftoverStock is your "quantity"
+      // (since you want leftover stock to appear as quantity)
+      const finalData = filteredData.map((item) => ({
+        id: item.productId.toString(), // or any unique ID
+        code: item.productInfo.sku || item.productInfo.barcode || '',
+        name: item.productInfo.name,
+        price: item.productInfo.price,
+        description: item.productInfo.description || '',
+        quantity: item.leftoverStock || 0, // leftover stock
+        totalSold: item.totalSold,        // you can keep totalSold if you want
+      }));
+
       return res.json({
         filter: 'Most Selling',
-        data: filteredData,
+        data: finalData,
       });
     }
 
@@ -365,19 +423,19 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
 
     if (!shopkeeperInventory) {
       // If no inventory record found, return empty array
-      return res.json([]);
+      return res.json({ filter: filter || 'None', data: [] });
     }
 
     // 3) Transform inventory docs into a front-end-friendly array
     let allProducts = shopkeeperInventory.products.map((p) => {
-      const productDoc = p.product_id || {}; // might be populated
+      const productDoc = p.product_id || {};
       return {
         id: p._id, // subdoc ID
         code: productDoc.sku || productDoc.barcode || '',
         name: productDoc.name || 'Unnamed Product',
-        price: p.selling_price,           // price from inventory subdoc
+        price: p.selling_price, // price from inventory subdoc
         description: productDoc.description || '',
-        quantity: p.stock_quantity,
+        quantity: p.stock_quantity, // leftover stock in inventory
       };
     });
 
@@ -392,8 +450,6 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
     }
 
     // 5) Apply filter logic for "Low stock" or "Achieved"
-    //    - "Low stock" => quantity < 5 (customize your threshold)
-    //    - "Achieved" => quantity > 0 (or your own definition)
     if (filter === 'Low stock') {
       allProducts = allProducts.filter((item) => item.quantity < 5);
     } else if (filter === 'Achieved') {
@@ -413,5 +469,6 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
     });
   }
 });
+
 
 module.exports = router;
