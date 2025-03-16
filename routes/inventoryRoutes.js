@@ -436,7 +436,7 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
 
         code: productDoc.sku || productDoc.barcode || '',
         image:productDoc.image||'',
-        productId:p.product_id,
+        productId:p.product_id._id,
         name: productDoc.name || 'Unnamed Product',
         price: p.selling_price, // price from inventory subdoc
         description: productDoc.description || '',
