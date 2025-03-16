@@ -401,6 +401,7 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
       // (since you want leftover stock to appear as quantity)
       const finalData = filteredData.map((item) => ({
         id: item.productId.toString(), // or any unique ID
+        image:item.productInfo.image||'',
         code: item.productInfo.sku || item.productInfo.barcode || '',
         name: item.productInfo.name,
         price: item.productInfo.price,
@@ -432,6 +433,8 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
       return {
         id: p._id, // subdoc ID
         code: productDoc.sku || productDoc.barcode || '',
+        image:productDoc.image||'',
+
         name: productDoc.name || 'Unnamed Product',
         price: p.selling_price, // price from inventory subdoc
         description: productDoc.description || '',
