@@ -261,14 +261,157 @@ router.put('/update/:id', async (req, res) => {
     }
 });
 
+// Get Product Details by ID
+router.get('/product/:id', async (req, res) => {
+    console.log(req.params.id);
+    
+    try {
+        const product = await product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ message: 'Product not found' });
+        }
+        res.status(200).json({ message: 'Product fetched successfully', product });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching product details', error });
+    }
+});
+
 // Delete an Inventory Product
 router.delete('/delete/:id', async (req, res) => {
+    console.log(req.params.id);
+    
     try {
         await Inventory.findByIdAndDelete(req.params.id);
         res.status(200).json({ message: 'Product removed from inventory successfully' });
     } catch (error) {
         res.status(500).json({ message: 'Error deleting inventory product', error });
     }
+});
+
+/**
+ * GET /inventory/:shopkeeper_id/product-finder
+ * Query Params: 
+ *   - filter = 'Most Selling' | 'Low stock' | 'Achieved' (optional)
+ *   - searchTerm = string (optional)
+ */
+router.get('/:shopkeeper_id/product-finder', async (req, res) => {
+  try {
+    const { shopkeeper_id } = req.params;
+    const { filter, searchTerm } = req.query;
+
+    // 1) Handle "Most Selling" filter with the same aggregation from your /fastselling route
+    //    If user specifically wants "Most Selling" results, we can skip inventory
+    //    and just return aggregator data:
+    if (filter === 'Most Selling') {
+      const shopkeeperObjectId = new mongoose.Types.ObjectId(shopkeeper_id);
+
+      const pipeline = [
+        { $match: { shopkeeper_id: shopkeeperObjectId } },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.product_id',
+            totalSold: { $sum: '$items.quantity' },
+          },
+        },
+        { $sort: { totalSold: -1 } },
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'productInfo',
+          },
+        },
+        { $unwind: '$productInfo' },
+        {
+          $project: {
+            productId: '$_id',
+            totalSold: 1,
+            'productInfo.name': 1,
+            'productInfo.barcode': 1,
+            'productInfo.sku': 1,
+            'productInfo.price': 1,
+            'productInfo.description': 1,
+            _id: 0,
+          },
+        },
+      ];
+
+      const fastSelling = await sales.aggregate(pipeline).exec();
+
+      // (Optional) apply a searchTerm filter if you want to match name/sku/barcode
+      let filteredData = fastSelling;
+      if (searchTerm) {
+        const lowerSearch = searchTerm.toLowerCase();
+        filteredData = fastSelling.filter((item) => {
+          const name = item.productInfo.name?.toLowerCase() || '';
+          const code = item.productInfo.sku?.toLowerCase() || item.productInfo.barcode?.toLowerCase() || '';
+          return name.includes(lowerSearch) || code.includes(lowerSearch);
+        });
+      }
+
+      return res.json({
+        filter: 'Most Selling',
+        data: filteredData,
+      });
+    }
+
+    // 2) Otherwise, fetch from the shopkeeper’s inventory:
+    const shopkeeperInventory = await inventory
+      .findOne({ shopkeeper_id })
+      .populate('products.product_id')
+      .exec();
+
+    if (!shopkeeperInventory) {
+      // If no inventory record found, return empty array
+      return res.json([]);
+    }
+
+    // 3) Transform inventory docs into a front-end-friendly array
+    let allProducts = shopkeeperInventory.products.map((p) => {
+      const productDoc = p.product_id || {}; // might be populated
+      return {
+        id: p._id, // subdoc ID
+        code: productDoc.sku || productDoc.barcode || '',
+        name: productDoc.name || 'Unnamed Product',
+        price: p.selling_price,           // price from inventory subdoc
+        description: productDoc.description || '',
+        quantity: p.stock_quantity,
+      };
+    });
+
+    // 4) Apply searchTerm filter (by name or code)
+    if (searchTerm) {
+      const lowerSearch = searchTerm.toLowerCase();
+      allProducts = allProducts.filter((item) => {
+        const codeMatch = item.code.toLowerCase().includes(lowerSearch);
+        const nameMatch = item.name.toLowerCase().includes(lowerSearch);
+        return codeMatch || nameMatch;
+      });
+    }
+
+    // 5) Apply filter logic for "Low stock" or "Achieved"
+    //    - "Low stock" => quantity < 5 (customize your threshold)
+    //    - "Achieved" => quantity > 0 (or your own definition)
+    if (filter === 'Low stock') {
+      allProducts = allProducts.filter((item) => item.quantity < 5);
+    } else if (filter === 'Achieved') {
+      allProducts = allProducts.filter((item) => item.quantity > 0);
+    }
+
+    // Return final list
+    return res.json({
+      filter: filter || 'None',
+      data: allProducts,
+    });
+  } catch (error) {
+    console.error('Error in product-finder route:', error);
+    return res.status(500).json({
+      message: 'Server error fetching products',
+      error: error.message,
+    });
+  }
 });
 
 module.exports = router;
