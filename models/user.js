@@ -42,6 +42,10 @@ const userSchema = new mongoose.Schema({
         enum: ["Basic", "Premium"],
         default: "Basic",
     },
+    isActive:{
+        type:Boolean,
+        default:true,
+    }
 }, { timestamps: true })
 
 module.exports = mongoose.model('Users', userSchema)
