@@ -404,11 +404,13 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
         image:item.productInfo.image||'',
         code: item.productInfo.sku || item.productInfo.barcode || '',
         name: item.productInfo.name,
+        productId:item.productId.toString(),
         price: item.productInfo.price,
         description: item.productInfo.description || '',
         quantity: item.leftoverStock || 0, // leftover stock
         totalSold: item.totalSold,        // you can keep totalSold if you want
       }));
+      console.log(filteredData);
       
 
       return res.json({
