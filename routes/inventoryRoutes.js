@@ -312,7 +312,6 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
     const shopkeeperObjectId = new mongoose.Types.ObjectId(shopkeeper_id);
 
     // 1) Handle "Most Selling" filter with an aggregation pipeline
-    //    that merges leftover stock from the inventory.
     if (filter === 'Most Selling') {
       const pipeline = [
         { $match: { shopkeeper_id: shopkeeperObjectId } },
@@ -333,32 +332,24 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
           },
         },
         { $unwind: '$productInfo' },
-
         // --- LOOKUP INVENTORY to get leftover stock ---
         {
           $lookup: {
             from: 'inventories',
             let: { productId: '$_id', shopkeeper: shopkeeperObjectId },
             pipeline: [
-              // Match only this shopkeeper’s inventory
               { $match: { $expr: { $eq: ['$shopkeeper_id', '$$shopkeeper'] } } },
-              // Unwind products array
               { $unwind: '$products' },
-              // Match the same product
               {
                 $match: {
-                  $expr: {
-                    $eq: ['$products.product_id', '$$productId'],
-                  },
+                  $expr: { $eq: ['$products.product_id', '$$productId'] },
                 },
               },
-              // Only keep the stock_quantity
               { $project: { 'products.stock_quantity': 1, _id: 0 } },
             ],
             as: 'inventoryInfo',
           },
         },
-        // If there's no matching product in the inventory, we still want to preserve the doc
         {
           $unwind: {
             path: '$inventoryInfo',
@@ -369,11 +360,11 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
           $project: {
             productId: '$_id',
             totalSold: 1,
-            // leftoverStock from the inventory
             leftoverStock: '$inventoryInfo.products.stock_quantity',
             'productInfo.name': 1,
             'productInfo.barcode': 1,
             'productInfo.sku': 1,
+            'productInfo.image': 1,
             'productInfo.price': 1,
             'productInfo.description': 1,
             _id: 0,
@@ -397,21 +388,18 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
         });
       }
 
-      // Transform the aggregator result so leftoverStock is your "quantity"
-      // (since you want leftover stock to appear as quantity)
+      // Transform aggregator result to match the consistent format
       const finalData = filteredData.map((item) => ({
-        id: item.productId.toString(), // or any unique ID
-        image:item.productInfo.image||'',
+        id: item.productId.toString(),
+        image: item.productInfo.image || '',
         code: item.productInfo.sku || item.productInfo.barcode || '',
         name: item.productInfo.name,
-        productId:item.productId.toString(),
+        productId: item.productId.toString(),
         price: item.productInfo.price,
         description: item.productInfo.description || '',
-        quantity: item.leftoverStock || 0, // leftover stock
-        totalSold: item.totalSold,        // you can keep totalSold if you want
+        quantity: item.leftoverStock || 0,
+        totalSold: item.totalSold,
       }));
-      console.log(filteredData);
-      
 
       return res.json({
         filter: 'Most Selling',
@@ -426,23 +414,23 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
       .exec();
 
     if (!shopkeeperInventory) {
-      // If no inventory record found, return empty array
       return res.json({ filter: filter || 'None', data: [] });
     }
 
-    // 3) Transform inventory docs into a front-end-friendly array
+    // 3) Transform inventory docs into a front-end-friendly array with consistent keys
     let allProducts = shopkeeperInventory.products.map((p) => {
       const productDoc = p.product_id || {};
       return {
-        id: p._id, // subdoc ID
-
+        // Using product id for consistency
+        id: productDoc._id ? productDoc._id.toString() : '',
+        image: productDoc.image || '',
         code: productDoc.sku || productDoc.barcode || '',
-        image:productDoc.image||'',
-        productId:p.product_id._id,
         name: productDoc.name || 'Unnamed Product',
-        price: p.selling_price, // price from inventory subdoc
+        productId: productDoc._id ? productDoc._id.toString() : '',
+        price: p.selling_price,
         description: productDoc.description || '',
-        quantity: p.stock_quantity, // leftover stock in inventory
+        quantity: p.stock_quantity,
+        totalSold: 0 // default value since this data isn't available here
       };
     });
 
@@ -463,7 +451,6 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
       allProducts = allProducts.filter((item) => item.quantity > 0);
     }
 
-    // Return final list
     return res.json({
       filter: filter || 'None',
       data: allProducts,
@@ -476,6 +463,7 @@ router.get('/:shopkeeper_id/product-finder', async (req, res) => {
     });
   }
 });
+
 
 
 module.exports = router;
