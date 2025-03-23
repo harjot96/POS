@@ -92,6 +92,8 @@ router.post('/add-product-inventory', upload.single('image'), async (req, res) =
       inventory: shopkeeperInventory,
     });
   } catch (error) {
+    console.log(error);
+    
     console.error(error);
     res.status(500).json({
       message: 'Error adding product to inventory',
