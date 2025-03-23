@@ -23,6 +23,11 @@ const InventorySchema = new mongoose.Schema({
                 type: String,
                 required: true
             },
+            image:{
+                type: String,
+                required: false,
+            },
+
             purchase_price: {
                 type: Number,
                 required: true

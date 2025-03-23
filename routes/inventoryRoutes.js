@@ -244,6 +244,7 @@ router.get('/:shopkeeper_id', async (req, res) => {
             'productInfo.sku': 1,
             'productInfo.price': 1,
             'productInfo.description': 1,
+            'productInfo.image': 1,
             _id: 0
           }
         }
