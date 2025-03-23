@@ -40,53 +40,49 @@ router.post('/add-product-inventory', upload.single('image'), async (req, res) =
       imageUrl = result.secure_url;
     }
 
-    // Step 1: Check if the product exists (by SKU or Barcode)
-    let existingProduct = await product.findOne({ $or: [{ sku }, { barcode }] });
-
-    if (!existingProduct) {
-      // Step 2: Create a new product if it does not exist
-      existingProduct = new product({
-        shopkeeper_id,
-        name,
-        category: category_id,
-        price,
-        sku,
-        barcode,
-        description,
-        image: imageUrl, // Save image URL in the product model
+    // Step 1: Check if the product already exists for this shopkeeper (by SKU or Barcode)
+    // This ensures that within the same shop, the SKU/barcode combination is unique.
+    let existingProduct = await product.findOne({
+      shopkeeper_id,
+      $or: [{ sku }, { barcode }]
+    });
+    if (existingProduct) {
+      return res.status(400).json({
+        message: 'Product with the same SKU or barcode already exists for this shop.'
       });
-      await existingProduct.save();
     }
 
-    // Step 3: Check if the shopkeeper's inventory exists
-    let shopkeeperInventory = await inventory.findOne({ shopkeeper_id });
+    // Step 2: Create a new product for this shopkeeper
+    const newProduct = new product({
+      shopkeeper_id,
+      name,
+      category: category_id,
+      price,
+      sku,
+      barcode,
+      description,
+      image: imageUrl,
+    });
+    await newProduct.save();
 
+    // Step 3: Check if the shopkeeper's inventory exists, create if it doesn't
+    let shopkeeperInventory = await inventory.findOne({ shopkeeper_id });
     if (!shopkeeperInventory) {
-      // Step 4: Create inventory if it doesn't exist
       shopkeeperInventory = new inventory({
         shopkeeper_id,
         products: [],
       });
     }
 
-    // Step 5: Check if the product is already in the inventory
-    const productExists = shopkeeperInventory.products.some(
-      (item) => item.product_id.toString() === existingProduct._id.toString()
-    );
-
-    if (productExists) {
-      return res.status(400).json({ message: 'Product already exists in inventory' });
-    }
-
-    // Step 6: Add the new product to the inventory, including the image URL
+    // Step 4: Add the new product to the shopkeeper's inventory
     shopkeeperInventory.products.push({
-      product_id: existingProduct._id,
+      product_id: newProduct._id,
       name,
       stock_quantity,
       purchase_price,
       selling_price,
       expiration_date,
-      image: imageUrl, // Save image URL in inventory as well (if needed)
+      image: imageUrl,
     });
 
     await shopkeeperInventory.save();
@@ -97,53 +93,60 @@ router.post('/add-product-inventory', upload.single('image'), async (req, res) =
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Error adding product to inventory', error: error.message });
+    res.status(500).json({
+      message: 'Error adding product to inventory',
+      error: error.message
+    });
   }
 });
+
+
 
 
 
 // Get Inventory for a Shopkeeper
 
 router.get('/:shopkeeper_id', async (req, res) => {
-    try {
-      // Find all inventory docs for this shopkeeper and populate product details along with category info
-      const inventories = await inventory.find({ shopkeeper_id: req.params.shopkeeper_id })
-        .populate({
-          path: 'products.product_id',
-          populate: { path: 'category', model: 'category' } // Nested population for category
-        })
-        .exec();
-  
-      // Transform the Mongoose documents into a front-end-friendly response
-      const transformed = inventories.map((inv) => ({
-        id: inv._id, // rename _id -> id
-        shopkeeperId: inv.shopkeeper_id,
-        createdAt: inv.created_at,
-        updatedAt: inv.updated_at,
-        products: inv.products.map((p) => ({
-            
-          id: p._id, // subdocument ID
-          productId: p.product_id ? p.product_id._id : null, // actual product's ID
-          name: p.product_id ? p.product_id.name : p.name, // fallback if not populated
-          description: p.product_id ? p.product_id.description : undefined,
-          stockQuantity: p.stock_quantity,
-          purchasePrice: p.purchase_price,
-          sellingPrice: p.selling_price,
-          barcode: p.product_id ? p.product_id.barcode : undefined,
-          sku: p.product_id ? p.product_id.sku : undefined,
-          // Category data from nested population
-          category: p.product_id ? p.product_id.category.name : null,
-          expirationDate: p.expiration_date,
-        })),
-      }));
-  
-      res.status(200).json(transformed);
-    } catch (error) {
-      console.error('Error fetching inventory:', error);
-      res.status(500).json({ message: 'Error fetching inventory', error });
-    }
-  });
+  try {
+    // Convert to ObjectId if necessary
+    const shopkeeperId = new mongoose.Types.ObjectId(req.params.shopkeeper_id);
+
+    // Find all inventory docs for this shopkeeper and populate product details along with category info
+    const inventories = await inventory.find({ shopkeeper_id: shopkeeperId })
+      .populate({
+        path: 'products.product_id',
+        populate: { path: 'category', model: 'category' } // Nested population for category
+      })
+      .exec();
+
+    // Transform the Mongoose documents into a front-end-friendly response
+    const transformed = inventories.map((inv) => ({
+      id: inv._id, // rename _id -> id
+      shopkeeperId: inv.shopkeeper_id,
+      createdAt: inv.created_at,
+      updatedAt: inv.updated_at,
+      products: inv.products.map((p) => ({
+        id: p._id, // subdocument ID
+        productId: p.product_id ? p.product_id._id : null, // actual product's ID
+        name: p.product_id ? p.product_id.name : p.name, // fallback if not populated
+        description: p.product_id ? p.product_id.description : undefined,
+        stockQuantity: p.stock_quantity,
+        purchasePrice: p.purchase_price,
+        sellingPrice: p.selling_price,
+        barcode: p.product_id ? p.product_id.barcode : undefined,
+        sku: p.product_id ? p.product_id.sku : undefined,
+        // Check nested category existence
+        category: p.product_id && p.product_id.category ? p.product_id.category.name : null,
+        expirationDate: p.expiration_date,
+      })),
+    }));
+
+    res.status(200).json(transformed);
+  } catch (error) {
+    console.error('Error fetching inventory:', error);
+    res.status(500).json({ message: 'Error fetching inventory', error });
+  }
+});
   
 
   router.get('/:shopkeeper_id/stats', async (req, res) => {
@@ -187,55 +190,37 @@ router.get('/:shopkeeper_id', async (req, res) => {
     try {
       const { shopkeeper_id } = req.params;
   
-      // Convert to a Mongoose ObjectId (good practice to ensure correct format)
+      // Option 1: If your sales collection stores shopkeeper_id as an ObjectId:
       const shopkeeperObjectId = new mongoose.Types.ObjectId(shopkeeper_id);
-  
-      // Aggregation pipeline steps:
-      // 1. Match sales belonging to this shopkeeper.
-      // 2. Unwind "items" so each item in the array becomes its own document.
-      // 3. Group by product_id, summing the quantities across all sales.
-      // 4. Sort by totalSold in descending order.
-      // 5. Lookup product details from the "products" collection.
-      // 6. Unwind the looked-up array (productInfo).
-      // 7. Project/rename fields as needed.
-      // 8. (Optional) limit how many you want to return, e.g. top 5 or 10.
+      // Option 2: If your sales collection stores shopkeeper_id as a string,
+      // then you might want to use the raw shopkeeper_id (uncomment the line below)
+      // const shopkeeperObjectId = shopkeeper_id;
   
       const pipeline = [
         {
+          // Ensure this field name exactly matches your sales documents
           $match: {
             shopkeeper_id: shopkeeperObjectId
           }
         },
-        // Each item in "items" will become a separate doc in the pipeline
-        {
-          $unwind: '$items'
-        },
+        { $unwind: '$items' },
         {
           $group: {
-            _id: '$items.product_id',         // group by product's ObjectId
-            totalSold: { $sum: '$items.quantity' } // sum the quantity across all sales
+            _id: '$items.product_id',       // Group by product id from each item
+            totalSold: { $sum: '$items.quantity' } // Sum quantities sold
           }
         },
+        { $sort: { totalSold: -1 } },
         {
-          $sort: { totalSold: -1 } // sort by totalSold descending
-        },
-        {
-          // Lookup product details from the "products" collection
           $lookup: {
-            from: 'products',    // name of the Products collection in MongoDB
-            localField: '_id',   // the product_id from our group
-            foreignField: '_id', // _id of the product in the Products collection
+            from: 'products',    // Ensure this matches the actual collection name
+            localField: '_id',   // product id from the group
+            foreignField: '_id', // product _id in the products collection
             as: 'productInfo'
           }
         },
-        // productInfo will be an array. Unwind it to flatten
+        { $unwind: '$productInfo' },
         {
-          $unwind: '$productInfo'
-        },
-        // (Optional) limit to top 5
-        // { $limit: 5 }, 
-        {
-          // Choose which fields to return (rename as needed)
           $project: {
             productId: '$_id',
             totalSold: 1,
@@ -248,6 +233,7 @@ router.get('/:shopkeeper_id', async (req, res) => {
             _id: 0
           }
         }
+        // Optionally add a $limit stage here if you want only the top 5 fast-selling items
       ];
   
       const fastSelling = await sales.aggregate(pipeline).exec();
@@ -261,6 +247,7 @@ router.get('/:shopkeeper_id', async (req, res) => {
       res.status(500).json({ message: 'Server error', error });
     }
   });
+  
   
 
 // Update Inventory Product Details
