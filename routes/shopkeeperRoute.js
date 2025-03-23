@@ -101,6 +101,26 @@ router.get('/:shopkeeper_id', async (req, res) => {
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]);
   
+      // Payment Breakdown aggregation by payment_method
+      const paymentBreakdownAgg = await Sales.aggregate([
+        { $match: { shopkeeper_id } },
+        { $group: { _id: "$payment_method", total: { $sum: "$total_amount" } } }
+      ]);
+      // Initialize default breakdown values
+      const paymentBreakdown = {
+        Cash: 0,
+        Card: 0,
+        UPI: 0,
+        Wallet: 0,
+        Other: 0,
+      };
+      paymentBreakdownAgg.forEach(item => {
+        // Ensure we only include our defined enum values
+        if (paymentBreakdown.hasOwnProperty(item._id)) {
+          paymentBreakdown[item._id] = item.total;
+        }
+      });
+  
       // Inventory and shopkeeper info
       const inventory = await Inventory.findOne({ shopkeeper_id });
       const shopkeeper = await User.findOne({ _id: shopkeeper_id });
@@ -121,7 +141,8 @@ router.get('/:shopkeeper_id', async (req, res) => {
         total_expenses: expensesTotal.length > 0 ? expensesTotal[0].total : 0,
         total_profit: (salesTotal.length > 0 ? salesTotal[0].total : 0) - (expensesTotal.length > 0 ? expensesTotal[0].total : 0),
         inventory_value: inventoryValue,
-        discountTotal: discountTotal.length > 0 ? discountTotal[0].total : 0
+        discountTotal: discountTotal.length > 0 ? discountTotal[0].total : 0,
+        paymentBreakdown, // Added payment breakdown here
       };
   
       // Append chart data if requested
@@ -135,7 +156,8 @@ router.get('/:shopkeeper_id', async (req, res) => {
       res.status(500).json({ message: 'Error fetching dashboard data', error: error.message });
     }
   });
-      
+  
+
   
   
   
