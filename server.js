@@ -7,8 +7,9 @@ const productRoute=require('./routes/productroute');
 const salesRoute=require('./routes/salesRoute');
 const expenseRoute=require('./routes/expenseRoute');
 const shopkeeperRoute=require('./routes/shopkeeperRoute');
+const cors = require('cors');
 
-
+app.use(cors()); 
 connectToDb();
 
 const app = express();
