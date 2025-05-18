@@ -109,66 +109,57 @@ router.post('/add', async (req, res) => {
 
 // Get all sales for a shopkeeper
 router.get('/:shopkeeper_id', async (req, res) => {
-    try {
-      const { shopkeeper_id } = req.params;
-      const { startDate, endDate } = req.query;
-      const { ObjectId } = mongoose.Types;
-  
-      console.log('Incoming shopkeeper_id:', shopkeeper_id);
-  
-      // 1) Check if user exists
-      const user = await User.findById(shopkeeper_id);
-      if (!user) {
-        return res.status(404).json({ message: 'Shopkeeper not found' });
-      }
-      const isPremium = user.subscription_plan === 'Premium';
-      console.log('User found:', user._id.toString(), 'Subscription:', user.subscription_plan);
-  
-      // 2) Build match
-      // If your Sales doc stores shopkeeper_id as ObjectId:
-      let match = { shopkeeper_id: new ObjectId(shopkeeper_id) };
-  
-      if (isPremium) {
-        if (startDate || endDate) {
-          match.created_at = {};
-          if (startDate) {
-            match.created_at.$gte = new Date(startDate);
-          }
-          if (endDate) {
-            match.created_at.$lte = new Date(endDate);
-          }
-        }
-      } else {
-        // Basic => last 7 days
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        match.created_at = { $gte: sevenDaysAgo };
-      }
-      console.log('Match criteria:', match);
-  
-      // 3) Just try a .find() to see if we get data
-      const debugSales = await Sales.find(match).sort({ created_at: -1 });
-      console.log('Found sales (debug):', debugSales.length);
-  
-      // 4) Now do the aggregator
-      const timeline = await Sales.aggregate([
-        { $match: match },
-        { $sort: { created_at: -1 } },
-        {
-          $group: {
-            _id: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } },
-            sales: { $push: '$$ROOT' }
-          }
-        },
-        { $sort: { _id: -1 } }
-      ]);
-  
-      console.log('Timeline:', timeline.length);
-      res.status(200).json(timeline);
-    } catch (error) {
-      console.error('Error fetching sales:', error);
-      res.status(500).json({ message: 'Error fetching sales', error });
+  try {
+    const { shopkeeper_id } = req.params;
+    const { startDate, endDate } = req.query;
+    const { ObjectId } = mongoose.Types;
+
+    // 1) Ensure shopkeeper exists
+    const user = await User.findById(shopkeeper_id);
+    if (!user) {
+      return res.status(404).json({ message: 'Shopkeeper not found' });
     }
-  });
+    const isPremium = user.subscription_plan === 'Premium';
+
+    // 2) Base match – always filter by shopkeeper_id
+    const match = { shopkeeper_id: new ObjectId(shopkeeper_id) };
+
+    // 3) Date logic: only add created_at if user passed any date params.
+    if (startDate || endDate) {
+      match.created_at = {};
+      if (startDate) match.created_at.$gte = new Date(startDate);
+      if (endDate)   match.created_at.$lte = new Date(endDate);
+    }
+    // 4) If no dates AND user is Basic -> default to last 7 days
+    else if (!isPremium) {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      match.created_at = { $gte: sevenDaysAgo };
+    }
+
+    console.log('Match criteria:', match);
+
+    // 5) Aggregate timeline by day
+    const timeline = await Sales.aggregate([
+      { $match: match },
+      { $sort: { created_at: -1 } },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$created_at' }
+          },
+          sales: { $push: '$$ROOT' }
+        }
+      },
+      { $sort: { _id: -1 } }
+    ]);
+
+    return res.status(200).json(timeline);
+  } catch (error) {
+    console.error('Error fetching sales:', error);
+    return res.status(500).json({ message: 'Error fetching sales', error });
+  }
+});
+
   
   
 

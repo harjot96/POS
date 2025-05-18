@@ -73,6 +73,7 @@ const verifyOtp = async (req, res) => {
 
         res.status(200).json({
             success: true,
+            
             isNewUser: false,
             isIncomplete: false,
             message: "OTP verified! Login successful.",
